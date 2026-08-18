@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Carnet de pilotage</title>
+<link rel="manifest" href="data:application/manifest+json,{%22name%22:%22Carnet%20de%20pilotage%22,%22short_name%22:%22Pilotage%22,%22start_url%22:%22.%22,%22display%22:%22standalone%22,%22background_color%22:%22%23E9EDF2%22,%22theme_color%22:%22%23243352%22}" />
+<style>
+  html, body { margin:0; padding:0; background:#E9EDF2; -webkit-tap-highlight-color: transparent; }
+  * { box-sizing: border-box; }
+  textarea, input, button { font: inherit; }
+  ::-webkit-scrollbar { display: none; }
+</style>
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.24.7/babel.min.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useCallback, useRef } = React;
+
+/* ---------------- Tokens ---------------- */
+const COLORS = {
+  paper: "#E9EDF2", paperLine: "#D3DAE2", card: "#FFFFFF",
+  ink: "#1B2430", inkSoft: "#5B6472", inkFaint: "#8A93A0",
+  amber: "#B9702F", amberSoft: "#F1E2D1",
+  green: "#3F7D58", greenSoft: "#DCEAE1",
+  red: "#B23A2E", redSoft: "#F3DEDB", navy: "#243352",
+};
+const DISPLAY_FONT = '"Space Grotesk","Avenir Next","Segoe UI",ui-sans-serif,sans-serif';
+const MONO_FONT = '"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace';
+const BODY_FONT = '"Inter",ui-sans-serif,-apple-system,"Segoe UI",sans-serif';
+
+/* ---------------- Tiny inline icons (no external icon lib) ---------------- */
+const Icon = ({ d, size=18, color="currentColor", strokeWidth=2 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">{d}</svg>
+);
+const ChevronLeft = (p) => <Icon {...p} d={<polyline points="15 18 9 12 15 6" />} />;
+const ChevronRight = (p) => <Icon {...p} d={<polyline points="9 18 15 12 9 6" />} />;
+const ChevronDown = (p) => <Icon {...p} d={<polyline points="6 9 12 15 18 9" />} />;
+const CheckIcon = (p) => <Icon {...p} d={<polyline points="20 6 9 17 4 12" />} />;
+const PlusIcon = (p) => <Icon {...p} d={<><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></>} />;
+const XIcon = (p) => <Icon {...p} d={<><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></>} />;
+
+/* ---------------- Content ---------------- */
+const REPERES = [
+  "CGP : 7 nouveaux clients",
+  "Marchand de biens : 3 visites/mois, opérations simples",
+  "Immobilier : crédit St Pierre (T4) + arbitrage Germain Morel",
+  "Finance : 20 000 € minimum investis",
+  "Santé : 6 habitudes → tendre vers 100 %",
+  "Famille : enfants maintenu · couple 6 · amis 10",
+];
+const GENERIC_QUESTIONS = [
+  "Où j'en suis vs la trajectoire attendue à cette date ?",
+  "Qu'est-ce qui a le plus fait avancer ce mois-ci, et qu'est-ce qui a freiné ?",
+  "Quelle unique action je change concrètement le mois prochain ?",
+];
+const OBJECTIVES = [
+  { id:"cgp", label:"CGP", target:"7 nouveaux clients",
+    checklist:[
+      "Identifier 10 prospects potentiels (café EDF, réseau perso, discussions repérées)",
+      "Solliciter 5 d'entre eux, priorité à l'assurance emprunteur si crédit en cours",
+      "Décrocher / tenir 1 à 2 RDV avec des prospects qualifiés",
+      "Proposer le parrainage à chaque signature et chaque RDV annuel du mois",
+      "Identifier un partenariat potentiel (notaire, comptable, courtier...)",
+      "Prendre contact avec un partenaire dans le mois",
+    ],
+    specific:"Combien de RDV pris ce mois-ci — suffisant pour tenir le rythme vers 7 clients ?" },
+  { id:"mdb", label:"Marchand de biens", target:"3 visites/mois",
+    checklist:[
+      "Maintenir le créneau quotidien de 30 min (veille annonces)",
+      "Vérifier/ajuster les alertes automatiques (Leboncoin, SeLoger, sites spécialisés)",
+      "Réaliser 3 visites dans le mois",
+      "Faire une offre chiffrée dans les 48h suivant une visite qui coche les critères",
+      "Contacter/relancer 1 agence locale pour se positionner comme acheteur prioritaire",
+    ],
+    specific:"Combien de visites réalisées vs 3/mois — pourquoi l'écart s'il y en a un ?" },
+  { id:"immo", label:"Patrimoine immobilier", target:"Crédit St Pierre + arbitrage Germain Morel",
+    checklist:null, specific:"Où en est St Pierre / l'arbitrage Germain Morel — prochaine étape avec date ?" },
+  { id:"finance", label:"Patrimoine financier", target:"20 000 € minimum investis",
+    checklist:null, specific:"Montant investi cumulé vs trajectoire vers 20 000 € ?" },
+  { id:"sante", label:"Santé / Bien-être", target:"6 habitudes → 100 %",
+    checklist:[
+      "Séance sport 1x/semaine (course le matin, ou calisthénie prête à l'avance)",
+      "10 000 pas visés 5x/semaine",
+      "Zéro vape maison/voiture, en continu",
+      "Rester attentif au déclic pour l'arrêt total du vapotage",
+    ],
+    specific:"Quelle habitude a le plus progressé ou régressé, et pourquoi ?" },
+  { id:"famille", label:"Famille", target:"Couple 6 · Amis 10",
+    checklist:[
+      "Poser à l'avance la garde d'enfants du mois avant de caler la sortie couple",
+      "1 sortie en couple bloquée au calendrier dans le mois",
+      "Voir les amis au fil des occasions naturelles",
+      "Vérifier en revue hebdo que le couple n'a pas été repoussé",
+    ],
+    specific:"Sorties couple/amis casées ce mois-ci, ou oubliées faute de créneau posé à l'avance ?" },
+];
+
+/* ---------------- Date helpers ---------------- */
+function getMonday(d) {
+  const date = new Date(d); const day = date.getDay();
+  const diff = (day === 0 ? -6 : 1) - day;
+  date.setDate(date.getDate() + diff); date.setHours(0,0,0,0);
+  return date;
+}
+function getISOWeekId(date) {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const weekNo = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+  return `${d.getUTCFullYear()}-W${String(weekNo).padStart(2,"0")}`;
+}
+function fmtShort(d) { return d.toLocaleDateString("fr-FR", { day:"numeric", month:"short" }); }
+function monthId(d) { return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; }
+function monthLabel(d) {
+  const s = d.toLocaleDateString("fr-FR", { month:"long", year:"numeric" });
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/* ---------------- Storage (localStorage — standalone deploy) ---------------- */
+function useEntry(key, initial) {
+  const [data, setData] = useState(initial);
+  const [loaded, setLoaded] = useState(false);
+  const saveTimer = useRef(null);
+
+  useEffect(() => {
+    setLoaded(false);
+    try {
+      const raw = window.localStorage.getItem(key);
+      setData(raw ? JSON.parse(raw) : initial);
+    } catch (e) { setData(initial); }
+    setLoaded(true);
+    // eslint-disable-next-line
+  }, [key]);
+
+  const save = useCallback((next) => {
+    setData(next);
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      try { window.localStorage.setItem(key, JSON.stringify(next)); } catch (e) {}
+    }, 300);
+  }, [key]);
+
+  return [data, save, loaded];
+}
+
+/* ---------------- UI atoms ---------------- */
+function StatusDot({ ratio }) {
+  let color = COLORS.red, bg = COLORS.redSoft;
+  if (ratio >= 0.8) { color = COLORS.green; bg = COLORS.greenSoft; }
+  else if (ratio > 0) { color = COLORS.amber; bg = COLORS.amberSoft; }
+  return <span style={{ display:"inline-flex", width:20, height:20, borderRadius:999, background:bg, border:`2px solid ${color}`, flexShrink:0 }} />;
+}
+function CheckRow({ checked, onChange, children }) {
+  return (
+    <button onClick={() => onChange(!checked)} style={{ fontFamily:BODY_FONT, width:"100%", display:"flex", alignItems:"flex-start", gap:12, padding:"10px 0", textAlign:"left", background:"none", border:"none", cursor:"pointer" }}>
+      <span style={{ width:22, height:22, borderRadius:6, border:`1.5px solid ${checked?COLORS.green:COLORS.paperLine}`, background:checked?COLORS.green:COLORS.card, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, marginTop:1 }}>
+        {checked && <CheckIcon size={14} color="#fff" strokeWidth={3} />}
+      </span>
+      <span style={{ color:checked?COLORS.inkFaint:COLORS.ink, textDecoration:checked?"line-through":"none", fontSize:14.5, lineHeight:1.4 }}>{children}</span>
+    </button>
+  );
+}
+function Field({ label, value, onChange, rows=2 }) {
+  return (
+    <div style={{ marginBottom:12 }}>
+      {label && <div style={{ fontFamily:BODY_FONT, color:COLORS.inkSoft, fontSize:12.5, marginBottom:6, fontWeight:500 }}>{label}</div>}
+      <textarea value={value} onChange={(e)=>onChange(e.target.value)} placeholder="..." rows={rows}
+        style={{ fontFamily:BODY_FONT, fontSize:14.5, color:COLORS.ink, background:COLORS.paper, border:`1px solid ${COLORS.paperLine}`, width:"100%", borderRadius:10, padding:"8px 12px", outline:"none", resize:"none" }}
+        onFocus={(e)=>e.target.style.borderColor=COLORS.amber}
+        onBlur={(e)=>e.target.style.borderColor=COLORS.paperLine} />
+    </div>
+  );
+}
+function Card({ children }) {
+  return <div style={{ background:COLORS.card, border:`1px solid ${COLORS.paperLine}`, borderRadius:16, padding:16, marginBottom:14 }}>{children}</div>;
+}
+function SectionTitle({ children }) {
+  return <div style={{ fontFamily:DISPLAY_FONT, color:COLORS.navy, fontWeight:600, fontSize:14.5, marginBottom:12 }}>{children}</div>;
+}
+function NavButton({ onClick, icon }) {
+  return (
+    <button onClick={onClick} style={{ background:COLORS.card, border:`1px solid ${COLORS.paperLine}`, color:COLORS.ink, width:36, height:36, borderRadius:999, display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer" }}>
+      {icon}
+    </button>
+  );
+}
+function LoadingBlock() {
+  return <div style={{ fontFamily:BODY_FONT, color:COLORS.inkFaint, textAlign:"center", padding:"48px 0", fontSize:14 }}>Chargement…</div>;
+}
+
+/* ---------------- Weekly ---------------- */
+function WeeklyView() {
+  const [anchor, setAnchor] = useState(new Date());
+  const monday = getMonday(anchor);
+  const sunday = new Date(monday); sunday.setDate(monday.getDate()+6);
+  const weekId = getISOWeekId(anchor);
+  const weekNum = weekId.split("-W")[1];
+
+  const initial = { actions:[{text:"",blocked:false},{text:"",blocked:false},{text:"",blocked:false}], process:{tasksIntegrated:false,notionClosed:false}, notes:"" };
+  const [data, save, loaded] = useEntry(`weekly:${weekId}`, initial);
+  const [reperesOpen, setReperesOpen] = useState(false);
+
+  if (!loaded) return <LoadingBlock/>;
+
+  const filledActions = data.actions.filter(a=>a.text.trim().length>0).length;
+  const overloaded = data.actions.length > 4 || filledActions > 4;
+
+  const updateAction = (i, patch) => save({ ...data, actions: data.actions.map((a,idx)=>idx===i?{...a,...patch}:a) });
+  const addAction = () => { if (data.actions.length>=6) return; save({ ...data, actions:[...data.actions,{text:"",blocked:false}] }); };
+  const removeAction = (i) => save({ ...data, actions: data.actions.filter((_,idx)=>idx!==i) });
+
+  return (
+    <div>
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:20 }}>
+        <NavButton onClick={()=>setAnchor(new Date(monday.getTime()-86400000))} icon={<ChevronLeft size={18}/>} />
+        <div style={{ textAlign:"center" }}>
+          <div style={{ fontFamily:MONO_FONT, color:COLORS.amber, fontSize:12, letterSpacing:1 }}>SEMAINE {weekNum}</div>
+          <div style={{ fontFamily:DISPLAY_FONT, color:COLORS.ink, fontSize:18, fontWeight:600 }}>{fmtShort(monday)} — {fmtShort(sunday)}</div>
+        </div>
+        <NavButton onClick={()=>setAnchor(new Date(sunday.getTime()+86400000))} icon={<ChevronRight size={18}/>} />
+      </div>
+
+      <Card>
+        <button onClick={()=>setReperesOpen(!reperesOpen)} style={{ width:"100%", display:"flex", alignItems:"center", justifyContent:"space-between", background:"none", border:"none", cursor:"pointer" }}>
+          <span style={{ fontFamily:DISPLAY_FONT, color:COLORS.navy, fontWeight:600, fontSize:14.5 }}>Repères annuels</span>
+          <ChevronDown size={16} color={COLORS.inkSoft} style={{ transform: reperesOpen?"rotate(180deg)":"none", transition:"transform 0.2s" }} />
+        </button>
+        {reperesOpen && (
+          <ul style={{ marginTop:12, paddingLeft:0, listStyle:"none" }}>
+            {REPERES.map((r,i)=>(<li key={i} style={{ fontFamily:BODY_FONT, color:COLORS.inkSoft, fontSize:13.5, marginBottom:6 }}>· {r}</li>))}
+          </ul>
+        )}
+      </Card>
+
+      <Card>
+        <SectionTitle>2-3 actions qui font avancer un objectif</SectionTitle>
+        {overloaded && (
+          <div style={{ background:COLORS.amberSoft, color:COLORS.amber, fontFamily:BODY_FONT, fontSize:12.5, borderRadius:8, padding:"8px 12px", marginBottom:12 }}>
+            Règle 80/20 : plus de 3-4 actions, c'est dispersé — recentrer.
+          </div>
+        )}
+        <div>
+          {data.actions.map((a,i)=>(
+            <div key={i} style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8 }}>
+              <button onClick={()=>updateAction(i,{blocked:!a.blocked})} style={{ flexShrink:0, background:"none", border:"none", cursor:"pointer", padding:0 }}>
+                <span style={{ width:22, height:22, borderRadius:6, border:`1.5px solid ${a.blocked?COLORS.green:COLORS.paperLine}`, background:a.blocked?COLORS.green:COLORS.card, display:"flex", alignItems:"center", justifyContent:"center" }}>
+                  {a.blocked && <CheckIcon size={14} color="#fff" strokeWidth={3} />}
+                </span>
+              </button>
+              <input value={a.text} onChange={(e)=>updateAction(i,{text:e.target.value})} placeholder={`Action ${i+1}`}
+                style={{ fontFamily:BODY_FONT, fontSize:14.5, color:COLORS.ink, background:COLORS.paper, border:`1px solid ${COLORS.paperLine}`, flex:1, borderRadius:10, padding:"8px 12px", outline:"none" }}
+                onFocus={(e)=>e.target.style.borderColor=COLORS.amber}
+                onBlur={(e)=>e.target.style.borderColor=COLORS.paperLine} />
+              {data.actions.length>1 && (
+                <button onClick={()=>removeAction(i)} style={{ flexShrink:0, background:"none", border:"none", cursor:"pointer", padding:0 }}>
+                  <XIcon size={16} color={COLORS.inkFaint} />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+        {data.actions.length<6 && (
+          <button onClick={addAction} style={{ fontFamily:BODY_FONT, color:COLORS.amber, fontSize:13, display:"flex", alignItems:"center", gap:4, marginTop:10, background:"none", border:"none", cursor:"pointer", padding:0 }}>
+            <PlusIcon size={14}/> Ajouter une action
+          </button>
+        )}
+        <div style={{ fontFamily:BODY_FONT, color:COLORS.inkFaint, fontSize:12, marginTop:4 }}>Case cochée = bloquée au calendrier</div>
+      </Card>
+
+      <Card>
+        <SectionTitle>Déroulé</SectionTitle>
+        <CheckRow checked={data.process.tasksIntegrated} onChange={(v)=>save({...data, process:{...data.process, tasksIntegrated:v}})}>
+          Reste des tâches (Google Tasks) intégré autour des blocs posés
+        </CheckRow>
+        <CheckRow checked={data.process.notionClosed} onChange={(v)=>save({...data, process:{...data.process, notionClosed:v}})}>
+          Dashboard Notion non rouvert cette semaine
+        </CheckRow>
+      </Card>
+
+      <Card>
+        <SectionTitle>Notes libres</SectionTitle>
+        <Field value={data.notes} onChange={(v)=>save({...data, notes:v})} rows={3} />
+      </Card>
+    </div>
+  );
+}
+
+/* ---------------- Monthly ---------------- */
+function ObjectiveCard({ def, entry, onChange }) {
+  const [open, setOpen] = useState(false);
+  const checklistDone = def.checklist ? def.checklist.filter((_,i)=>entry.checklist?.[i]).length : 0;
+  const checklistTotal = def.checklist ? def.checklist.length : 0;
+  const textFieldsFilled = [entry.q0, entry.q1, entry.q2, entry.specific].filter(v=>(v||"").trim().length>0).length;
+  const ratio = def.checklist ? (checklistTotal ? checklistDone/checklistTotal : 0) : textFieldsFilled/4;
+
+  const toggleChecklist = (i) => {
+    const cl = entry.checklist ? [...entry.checklist] : def.checklist.map(()=>false);
+    cl[i] = !cl[i];
+    onChange({ ...entry, checklist: cl });
+  };
+
+  return (
+    <Card>
+      <button onClick={()=>setOpen(!open)} style={{ width:"100%", display:"flex", alignItems:"center", justifyContent:"space-between", background:"none", border:"none", cursor:"pointer" }}>
+        <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+          <StatusDot ratio={ratio} />
+          <div style={{ textAlign:"left" }}>
+            <div style={{ fontFamily:DISPLAY_FONT, color:COLORS.navy, fontWeight:600, fontSize:15 }}>{def.label}</div>
+            <div style={{ fontFamily:MONO_FONT, color:COLORS.inkFaint, fontSize:11.5 }}>{def.target}</div>
+          </div>
+        </div>
+        <ChevronDown size={16} color={COLORS.inkSoft} style={{ transform: open?"rotate(180deg)":"none", transition:"transform 0.2s" }} />
+      </button>
+
+      {open && (
+        <div style={{ marginTop:16, paddingTop:16, borderTop:`1px solid ${COLORS.paperLine}` }}>
+          {def.checklist && (
+            <div style={{ marginBottom:16 }}>
+              {def.checklist.map((item,i)=>(
+                <CheckRow key={i} checked={!!entry.checklist?.[i]} onChange={()=>toggleChecklist(i)}>{item}</CheckRow>
+              ))}
+            </div>
+          )}
+          <Field label={GENERIC_QUESTIONS[0]} value={entry.q0||""} onChange={(v)=>onChange({...entry,q0:v})} />
+          <Field label={GENERIC_QUESTIONS[1]} value={entry.q1||""} onChange={(v)=>onChange({...entry,q1:v})} />
+          <Field label={GENERIC_QUESTIONS[2]} value={entry.q2||""} onChange={(v)=>onChange({...entry,q2:v})} />
+          <Field label={def.specific} value={entry.specific||""} onChange={(v)=>onChange({...entry,specific:v})} />
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function MonthlyView() {
+  const [anchor, setAnchor] = useState(new Date());
+  const mId = monthId(anchor);
+  const initial = { objectives:{}, notes:"" };
+  const [data, save, loaded] = useEntry(`monthly:${mId}`, initial);
+
+  if (!loaded) return <LoadingBlock/>;
+
+  const updateObjective = (id, entry) => save({ ...data, objectives:{ ...data.objectives, [id]:entry } });
+  const prevMonth = () => { const d=new Date(anchor); d.setDate(1); d.setMonth(d.getMonth()-1); setAnchor(d); };
+  const nextMonth = () => { const d=new Date(anchor); d.setDate(1); d.setMonth(d.getMonth()+1); setAnchor(d); };
+
+  return (
+    <div>
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:20 }}>
+        <NavButton onClick={prevMonth} icon={<ChevronLeft size={18}/>} />
+        <div style={{ fontFamily:DISPLAY_FONT, color:COLORS.ink, fontSize:18, fontWeight:600 }}>{monthLabel(anchor)}</div>
+        <NavButton onClick={nextMonth} icon={<ChevronRight size={18}/>} />
+      </div>
+
+      {OBJECTIVES.map((def)=>(
+        <ObjectiveCard key={def.id} def={def} entry={data.objectives[def.id]||{}} onChange={(entry)=>updateObjective(def.id, entry)} />
+      ))}
+
+      <Card>
+        <SectionTitle>Notes libres du mois</SectionTitle>
+        <Field value={data.notes} onChange={(v)=>save({...data, notes:v})} rows={3} />
+      </Card>
+    </div>
+  );
+}
+
+/* ---------------- Root ---------------- */
+function CarnetDePilotage() {
+  const [tab, setTab] = useState("weekly");
+  return (
+    <div style={{ background:COLORS.paper, minHeight:"100vh", paddingBottom:64 }}>
+      <div style={{ maxWidth:448, margin:"0 auto", padding:"24px 16px 0" }}>
+        <div style={{ marginBottom:24 }}>
+          <div style={{ fontFamily:MONO_FONT, color:COLORS.amber, fontSize:11, letterSpacing:1.5 }}>FD CONSEIL · EDF</div>
+          <div style={{ fontFamily:DISPLAY_FONT, color:COLORS.ink, fontSize:26, fontWeight:700 }}>Carnet de pilotage</div>
+        </div>
+
+        <div style={{ background:COLORS.card, border:`1px solid ${COLORS.paperLine}`, display:"flex", borderRadius:999, padding:4, marginBottom:24 }}>
+          {[{id:"weekly",label:"Hebdomadaire"},{id:"monthly",label:"Mensuelle"}].map(t=>(
+            <button key={t.id} onClick={()=>setTab(t.id)}
+              style={{ fontFamily:BODY_FONT, fontWeight:600, fontSize:13.5, color: tab===t.id?"#fff":COLORS.inkSoft, background: tab===t.id?COLORS.navy:"transparent", transition:"background 0.2s, color 0.2s", flex:1, padding:"8px 0", borderRadius:999, border:"none", cursor:"pointer" }}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        {tab === "weekly" ? <WeeklyView/> : <MonthlyView/>}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<CarnetDePilotage />);
+</script>
+</body>
+</html>
