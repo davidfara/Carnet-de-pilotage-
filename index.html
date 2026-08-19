@@ -106,19 +106,35 @@ function getMonday(d) {
   date.setDate(date.getDate() + diff); date.setHours(0,0,0,0);
   return date;
 }
-function getISOWeekId(date) {
-  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
-  const dayNum = d.getUTCDay() || 7;
-  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
-  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-  const weekNo = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
-  return `${d.getUTCFullYear()}-W${String(weekNo).padStart(2,"0")}`;
-}
-function fmtShort(d) { return d.toLocaleDateString("fr-FR", { day:"numeric", month:"short" }); }
+function fmtShort(d) { return d.toLocaleDateString("fr-FR", { day:"numeric", month:"short", timeZone:"UTC" }); }
 function monthId(d) { return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; }
 function monthLabel(d) {
   const s = d.toLocaleDateString("fr-FR", { month:"long", year:"numeric" });
   return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/* -------- Perpetual weekly calendar (pure UTC, immune to DST drift) -------- */
+const DAY_MS = 86400000;
+const WEEK_MS = 7 * DAY_MS;
+function isoWeekIdUTC(ts) {
+  const d = new Date(ts);
+  const dayNum = d.getUTCDay() || 7;
+  const thursday = new Date(ts);
+  thursday.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = Date.UTC(thursday.getUTCFullYear(), 0, 1);
+  const weekNo = Math.ceil(((thursday.getTime() - yearStart) / DAY_MS + 1) / 7);
+  return `${thursday.getUTCFullYear()}-W${String(weekNo).padStart(2,"0")}`;
+}
+function isoWeekStartTs(year, week) {
+  const simple = Date.UTC(year, 0, 1 + (week - 1) * 7);
+  const dow = new Date(simple).getUTCDay();
+  return dow <= 4 ? simple - (dow - 1) * DAY_MS : simple + (8 - dow) * DAY_MS;
+}
+const CYCLE_START_TS = isoWeekStartTs(2026, 35);
+const CYCLE_END_TS = isoWeekStartTs(2027, 35);
+const WEEKS = [];
+for (let ts = CYCLE_START_TS; ts <= CYCLE_END_TS; ts += WEEK_MS) {
+  WEEKS.push({ ts, id: isoWeekIdUTC(ts) });
 }
 
 /* ---------------- Storage (localStorage — standalone deploy) ---------------- */
@@ -182,9 +198,9 @@ function Card({ children }) {
 function SectionTitle({ children }) {
   return <div style={{ fontFamily:DISPLAY_FONT, color:COLORS.navy, fontWeight:600, fontSize:14.5, marginBottom:12 }}>{children}</div>;
 }
-function NavButton({ onClick, icon }) {
+function NavButton({ onClick, icon, disabled }) {
   return (
-    <button onClick={onClick} style={{ background:COLORS.card, border:`1px solid ${COLORS.paperLine}`, color:COLORS.ink, width:36, height:36, borderRadius:999, display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer" }}>
+    <button onClick={onClick} disabled={disabled} style={{ background:COLORS.card, border:`1px solid ${COLORS.paperLine}`, color: disabled?COLORS.inkFaint:COLORS.ink, opacity: disabled?0.4:1, width:36, height:36, borderRadius:999, display:"flex", alignItems:"center", justifyContent:"center", cursor: disabled?"default":"pointer" }}>
       {icon}
     </button>
   );
@@ -195,13 +211,16 @@ function LoadingBlock() {
 
 /* ---------------- Weekly ---------------- */
 function WeeklyView() {
-  const [anchor, setAnchor] = useState(new Date());
-  const monday = getMonday(anchor);
-  const sunday = new Date(monday); sunday.setDate(monday.getDate()+6);
-  const weekId = getISOWeekId(anchor);
+  const [idx, setIdx] = useState(0);
+  const week = WEEKS[idx];
+  const weekId = week.id;
   const weekNum = weekId.split("-W")[1];
+  const monday = new Date(week.ts);
+  const sunday = new Date(week.ts + 6 * DAY_MS);
+  const atMin = idx <= 0;
+  const atMax = idx >= WEEKS.length - 1;
 
-  const initial = { actions:[{text:"",blocked:false},{text:"",blocked:false},{text:"",blocked:false}], process:{tasksIntegrated:false,notionClosed:false}, notes:"" };
+  const initial = { actions:[{text:"",blocked:false},{text:"",blocked:false},{text:"",blocked:false}], process:{tasksIntegrated:false}, notes:"" };
   const [data, save, loaded] = useEntry(`weekly:${weekId}`, initial);
   const [reperesOpen, setReperesOpen] = useState(false);
 
@@ -217,12 +236,12 @@ function WeeklyView() {
   return (
     <div>
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:20 }}>
-        <NavButton onClick={()=>setAnchor(new Date(monday.getTime()-86400000))} icon={<ChevronLeft size={18}/>} />
+        <NavButton disabled={atMin} onClick={()=>setIdx(i=>Math.max(0,i-1))} icon={<ChevronLeft size={18}/>} />
         <div style={{ textAlign:"center" }}>
           <div style={{ fontFamily:MONO_FONT, color:COLORS.amber, fontSize:12, letterSpacing:1 }}>SEMAINE {weekNum}</div>
           <div style={{ fontFamily:DISPLAY_FONT, color:COLORS.ink, fontSize:18, fontWeight:600 }}>{fmtShort(monday)} — {fmtShort(sunday)}</div>
         </div>
-        <NavButton onClick={()=>setAnchor(new Date(sunday.getTime()+86400000))} icon={<ChevronRight size={18}/>} />
+        <NavButton disabled={atMax} onClick={()=>setIdx(i=>Math.min(WEEKS.length-1,i+1))} icon={<ChevronRight size={18}/>} />
       </div>
 
       <Card>
@@ -275,10 +294,7 @@ function WeeklyView() {
       <Card>
         <SectionTitle>Déroulé</SectionTitle>
         <CheckRow checked={data.process.tasksIntegrated} onChange={(v)=>save({...data, process:{...data.process, tasksIntegrated:v}})}>
-          Reste des tâches (Google Tasks) intégré autour des blocs posés
-        </CheckRow>
-        <CheckRow checked={data.process.notionClosed} onChange={(v)=>save({...data, process:{...data.process, notionClosed:v}})}>
-          Dashboard Notion non rouvert cette semaine
+          Intégré les tâches dans l'agenda
         </CheckRow>
       </Card>
 
